@@ -1355,8 +1355,9 @@ def escape_ical_text(s: str) -> str:
     return s
 
 
-def build_paris_vtimezone_text():
-    return "\n".join([
+def build_paris_vtimezone_lines() -> List[str]:
+    """Retourne le bloc VTIMEZONE sous forme de lignes iCalendar."""
+    return [
         "BEGIN:VTIMEZONE",
         "TZID:Europe/Paris",
         "X-LIC-LOCATION:Europe/Paris",
@@ -1374,8 +1375,46 @@ def build_paris_vtimezone_text():
         "DTSTART:19701025T030000",
         "RRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=-1SU",
         "END:STANDARD",
-        "END:VTIMEZONE"
-    ])
+        "END:VTIMEZONE",
+    ]
+
+
+def fold_ical_line(line: str, limit: int = 75) -> List[str]:
+    """Plie une ligne iCalendar à 75 octets maximum (RFC 5545 §3.1).
+
+    Les lignes de continuation commencent par un espace. Le découpage se fait
+    caractère par caractère afin de ne jamais couper une séquence UTF-8.
+    """
+    if not line:
+        return [""]
+
+    folded = []
+    current = ""
+    current_bytes = 0
+    max_bytes = limit
+
+    for char in line:
+        char_bytes = len(char.encode("utf-8"))
+        if current and current_bytes + char_bytes > max_bytes:
+            folded.append(current)
+            current = " " + char
+            current_bytes = 1 + char_bytes
+            # Le premier octet de la ligne de continuation est l'espace.
+            max_bytes = limit
+        else:
+            current += char
+            current_bytes += char_bytes
+
+    folded.append(current)
+    return folded
+
+
+def serialize_ical_lines(lines: List[str]) -> str:
+    """Sérialise des lignes iCalendar avec CRLF et pliage RFC 5545."""
+    folded_lines = []
+    for line in lines:
+        folded_lines.extend(fold_ical_line(line))
+    return "\r\n".join(folded_lines) + "\r\n"
 
 
 def events_to_ics_string(events: List[dict], tzname='Europe/Paris', uid_namespace: str = 'edt') -> str:
@@ -1384,11 +1423,12 @@ def events_to_ics_string(events: List[dict], tzname='Europe/Paris', uid_namespac
     header = [
         'BEGIN:VCALENDAR',
         'VERSION:2.0',
-        'PRODID:-//EDT Export//FR',
+        'PRODID:-//CESI EDT//FR',
         'CALSCALE:GREGORIAN',
+        'METHOD:PUBLISH',
     ]
 
-    body = [build_paris_vtimezone_text()]
+    body = build_paris_vtimezone_lines()
 
     for ev in events:
         uid_source = '|'.join([uid_namespace, str(ev.get('start','')), str(ev.get('end','')), str(ev.get('summary','')), ','.join(ev.get('groups',[]) or [])])
@@ -1465,7 +1505,7 @@ def events_to_ics_string(events: List[dict], tzname='Europe/Paris', uid_namespac
         body.extend(event_lines)
 
     footer = ['END:VCALENDAR']
-    return '\n'.join(header + body + footer)
+    return serialize_ical_lines(header + body + footer)
 
 
 # ==========================================
@@ -1767,25 +1807,108 @@ async def inject_rooms_from_opus(
 
 # --- URL PUBLIQUE POUR OUTLOOK ---
 
-@app.get("/ics/{slug}/{group}.ics")
-async def get_ics_file(slug: str, group: str):
+@app.api_route("/ics/{slug}/enseignant.ics", methods=["GET", "HEAD"])
+async def get_teacher_ics_file(slug: str, teacher: str, request: Request):
+    """Flux ICS public et stable d'un enseignant, utilisable en abonnement calendrier."""
+    try:
+        res = (
+            supabase.table("plannings")
+            .select("events_p1, events_p2, teachers_data")
+            .ilike("slug", slug)
+            .execute()
+        )
+        if not res.data:
+            raise HTTPException(404, detail="Planning introuvable")
+
+        data = res.data[0]
+        known_teachers = {
+            str(t.get("name", "")).strip()
+            for t in (data.get("teachers_data") or [])
+        }
+
+        # Conserver l'origine P1/P2 : le calendrier de l'enseignant mélange les
+        # deux promotions et l'information doit donc voyager avec chaque séance.
+        all_events = []
+        for ev in (data.get("events_p1") or []):
+            all_events.append({**ev, "promo_label": "P1"})
+        for ev in (data.get("events_p2") or []):
+            all_events.append({**ev, "promo_label": "P2"})
+
+        events = [
+            ev for ev in all_events
+            if teacher in (ev.get("teachers") or [])
+        ]
+        if teacher not in known_teachers and not events:
+            raise HTTPException(404, detail="Enseignant introuvable")
+
+        ics_content = events_to_ics_string(
+            events,
+            uid_namespace=f"{slug}:teacher:{teacher}",
+        )
+        ics_bytes = ics_content.encode("utf-8")
+        safe_name = (
+            re.sub(r"[^A-Za-z0-9_-]+", "_", teacher).strip("_")
+            or "enseignant"
+        )
+
+        headers = {
+            "Content-Type": "text/calendar; charset=utf-8",
+            "Content-Disposition": f'inline; filename="Planning_{safe_name}.ics"',
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Content-Length": str(len(ics_bytes)),
+        }
+
+        if request.method == "HEAD":
+            return Response(content=b"", status_code=200, headers=headers)
+
+        return Response(content=ics_bytes, status_code=200, headers=headers)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        log_msg(f"Erreur ICS enseignant: {e}")
+        raise HTTPException(500, detail="Erreur interne")
+
+
+@app.api_route("/ics/{slug}/{group}.ics", methods=["GET", "HEAD"])
+async def get_ics_file(slug: str, group: str, request: Request):
+    """Flux ICS public P1/P2, compatible abonnement Thunderbird/Outlook."""
     group_clean = group.upper()
     if group_clean not in ["P1", "P2"]:
         raise HTTPException(404, detail="Groupe inconnu (utiliser P1 ou P2)")
 
     try:
-        res = supabase.table("plannings").select(f"events_{group_clean.lower()}").ilike("slug", slug).execute()
+        res = (
+            supabase.table("plannings")
+            .select(f"events_{group_clean.lower()}")
+            .ilike("slug", slug)
+            .execute()
+        )
 
         if not res.data:
             raise HTTPException(404, detail="Planning introuvable")
 
         events_json = res.data[0].get(f"events_{group_clean.lower()}", []) or []
-        ics_content = events_to_ics_string(events_json)
+        ics_content = events_to_ics_string(
+            events_json,
+            uid_namespace=f"{slug}:{group_clean}",
+        )
+        ics_bytes = ics_content.encode("utf-8")
         filename = f"{slug}_{group_clean}.ics"
 
-        return Response(content=ics_content, media_type="text/calendar", headers={
-            "Content-Disposition": f"attachment; filename={filename}"
-        })
+        headers = {
+            "Content-Type": "text/calendar; charset=utf-8",
+            "Content-Disposition": f'inline; filename="{filename}"',
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Content-Length": str(len(ics_bytes)),
+        }
+
+        # Thunderbird 140+ peut sonder un abonnement ICS avec HEAD avant GET.
+        # FastAPI n'ajoute pas HEAD automatiquement aux routes @app.get().
+        if request.method == "HEAD":
+            return Response(content=b"", status_code=200, headers=headers)
+
+        return Response(content=ics_bytes, status_code=200, headers=headers)
 
     except HTTPException:
         raise
@@ -1794,38 +1917,6 @@ async def get_ics_file(slug: str, group: str):
         raise HTTPException(500, detail="Erreur interne")
 
 
-@app.get("/ics/{slug}/enseignant.ics")
-async def get_teacher_ics_file(slug: str, teacher: str):
-    """Flux ICS public et stable d'un enseignant, utilisable en abonnement calendrier."""
-    try:
-        res = supabase.table("plannings").select("events_p1, events_p2, teachers_data").ilike("slug", slug).execute()
-        if not res.data:
-            raise HTTPException(404, detail="Planning introuvable")
-
-        data = res.data[0]
-        known_teachers = {str(t.get("name", "")).strip() for t in (data.get("teachers_data") or [])}
-        # Conserver l'origine P1/P2 : le calendrier de l'enseignant mélange les
-        # deux promotions et l'information doit donc voyager avec chaque séance.
-        all_events = []
-        for ev in (data.get("events_p1") or []):
-            all_events.append({**ev, "promo_label": "P1"})
-        for ev in (data.get("events_p2") or []):
-            all_events.append({**ev, "promo_label": "P2"})
-        events = [ev for ev in all_events if teacher in (ev.get("teachers") or [])]
-        if teacher not in known_teachers and not events:
-            raise HTTPException(404, detail="Enseignant introuvable")
-
-        ics_content = events_to_ics_string(events, uid_namespace=f"{slug}:teacher:{teacher}")
-        safe_name = re.sub(r"[^A-Za-z0-9_-]+", "_", teacher).strip("_") or "enseignant"
-        return Response(content=ics_content, media_type="text/calendar; charset=utf-8", headers={
-            "Content-Disposition": f'inline; filename="Planning_{safe_name}.ics"',
-            "Cache-Control": "no-cache, no-store, must-revalidate",
-        })
-    except HTTPException:
-        raise
-    except Exception as e:
-        log_msg(f"Erreur ICS enseignant: {e}")
-        raise HTTPException(500, detail="Erreur interne")
 
 
 # --- VUE PUBLIQUE CALENDRIER ---
