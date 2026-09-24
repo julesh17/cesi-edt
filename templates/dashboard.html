@@ -521,9 +521,42 @@
 
     <div class="panel-card">
         <h3>Budget par mois</h3>
-        <p style="font-size:12px; color:var(--text-2); margin-bottom:14px;">Toutes promos combinées (P1 + P2).</p>
+        <p style="font-size:12px; color:var(--text-2); margin-bottom:14px;">Ventilation mensuelle par promo et budget total.</p>
         <button class="copy-btn" onclick="copyBudgetMonth()"><i class="bi bi-clipboard"></i> Copier le tableau</button>
         <div class="table-scroll"><table class="data-table" id="budget-month-table"></table></div>
+    </div>
+
+    <div class="panel-card">
+        <h3>Répartition enseignants internes / externes</h3>
+        <p style="font-size:12px; color:var(--text-2); margin-bottom:14px;">
+            Interne = tarif horaire égal à 0 €. Externe = tarif horaire différent de 0 €.
+            Les pourcentages sont calculés sur les heures d’enseignement des enseignants ; en cas de co-enseignement, chaque enseignant compte pour la durée de la séance.
+        </p>
+        <div class="metrics-row" id="teacher-type-global-metrics"></div>
+    </div>
+
+    <div style="display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap:20px;">
+        <div class="panel-card">
+            <h3>Par mois</h3>
+            <div class="table-scroll"><table class="data-table" id="teacher-type-month-table"></table></div>
+        </div>
+        <div class="panel-card">
+            <h3>Par promo</h3>
+            <div class="table-scroll"><table class="data-table" id="teacher-type-promo-table"></table></div>
+        </div>
+    </div>
+
+    <div class="panel-card">
+        <h3>Par matière</h3>
+        <div class="table-scroll"><table class="data-table" id="teacher-type-subject-table"></table></div>
+    </div>
+
+    <div class="panel-card">
+        <h3>Jours de présence sur le campus</h3>
+        <p style="font-size:12px; color:var(--text-2); margin-bottom:14px;">
+            Nombre de dates distinctes où au moins un cours est planifié. Les périodes entreprise, jours fériés et autres matières ignorées ne sont pas comptés comme jours de présence.
+        </p>
+        <div class="table-scroll"><table class="data-table" id="campus-days-table"></table></div>
     </div>
 
     <div class="panel-card">
@@ -565,7 +598,7 @@ const DAYS_FR = {1:'Lundi',2:'Mardi',3:'Mercredi',4:'Jeudi',5:'Vendredi',6:'Same
 const IGNORE_SUBJECTS = new Set([
     "erasmus day","forum international","période entreprise","periode entreprise",
     "férié","ferie","mission à l'international","mission a l'international",
-    "matière","matières","divers"
+    "matière","matières","divers", "mission en entreprise"
 ]);
 
 function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
@@ -1357,6 +1390,8 @@ function initBudgetTab() {
     renderBudgetGlobalMetrics();
     bcalInit();
     renderBudgetMonthTable();
+    renderTeacherTypeAnalysis();
+    renderCampusDaysTable();
     renderBudgetYearMetrics();
 }
 
@@ -1658,30 +1693,54 @@ function bcalClosePopup() {
     if (overlay) overlay.style.display = 'none';
 }
 
-// ── Budget par mois (P1+P2 combinées) ──
+// ── Budget par mois : ventilation P1 / P2 / total ──
 function renderBudgetMonthTable() {
-    const monthTotals = {}; // "YYYY-MM" -> { amount, hours, label }
+    const monthTotals = {}; // "YYYY-MM" -> { p1, p2, hours, label }
+
     for (const ev of ALL_EVENTS_FLAT) {
         const d = ev.startDt;
         const key = `${d.getFullYear()}-${fmt2(d.getMonth()+1)}`;
         if (!monthTotals[key]) {
             monthTotals[key] = {
-                amount: 0, hours: 0,
-                label: `${MONTHS_FR[d.getMonth()+1].charAt(0).toUpperCase()}${MONTHS_FR[d.getMonth()+1].slice(1)} ${d.getFullYear()}`,
-                sortKey: key
+                p1: 0,
+                p2: 0,
+                hours: 0,
+                label: `${MONTHS_FR[d.getMonth()+1].charAt(0).toUpperCase()}${MONTHS_FR[d.getMonth()+1].slice(1)} ${d.getFullYear()}`
             };
         }
-        monthTotals[key].amount += seanceAmount(ev);
+
+        const amount = seanceAmount(ev);
+        if (ev.promo_label === 'P1') monthTotals[key].p1 += amount;
+        if (ev.promo_label === 'P2') monthTotals[key].p2 += amount;
         monthTotals[key].hours += durH(ev);
     }
 
     const sortedKeys = Object.keys(monthTotals).sort();
-    const headers = ['Mois','Heures','Budget'];
-    const rowsDisplay = sortedKeys.map(k => ({
-        'Mois': monthTotals[k].label,
-        'Heures': Math.round(monthTotals[k].hours*100)/100,
-        'Budget': fmtEUR(monthTotals[k].amount),
-    }));
+    const headers = ['Mois', 'Heures', 'Budget P1', 'Budget P2', 'Budget total'];
+    const rowsDisplay = sortedKeys.map(k => {
+        const m = monthTotals[k];
+        return {
+            'Mois': m.label,
+            'Heures': Math.round(m.hours * 100) / 100,
+            'Budget P1': fmtEUR(m.p1),
+            'Budget P2': fmtEUR(m.p2),
+            'Budget total': fmtEUR(m.p1 + m.p2),
+        };
+    });
+
+    // Ligne total année
+    if (rowsDisplay.length) {
+        const totalP1 = sortedKeys.reduce((s,k) => s + monthTotals[k].p1, 0);
+        const totalP2 = sortedKeys.reduce((s,k) => s + monthTotals[k].p2, 0);
+        const totalHours = sortedKeys.reduce((s,k) => s + monthTotals[k].hours, 0);
+        rowsDisplay.push({
+            'Mois': 'TOTAL',
+            'Heures': Math.round(totalHours * 100) / 100,
+            'Budget P1': fmtEUR(totalP1),
+            'Budget P2': fmtEUR(totalP2),
+            'Budget total': fmtEUR(totalP1 + totalP2),
+        });
+    }
 
     const table = document.getElementById('budget-month-table');
     if (rowsDisplay.length === 0) {
@@ -1693,6 +1752,155 @@ function renderBudgetMonthTable() {
 
 function copyBudgetMonth() {
     copyTableToClipboard('budget-month-table');
+}
+
+// ── Répartition enseignants internes / externes ──
+function teacherTypeFromRate(rate) {
+    return Number(rate || 0) === 0 ? 'internal' : 'external';
+}
+
+function emptyTeacherTypeBucket() {
+    return { internalHours: 0, externalHours: 0, internalTeachers: new Set(), externalTeachers: new Set() };
+}
+
+function addEventTeacherType(bucket, ev) {
+    const hours = durH(ev);
+    for (const teacher of (ev.teachers || [])) {
+        const type = teacherTypeFromRate(getTeacherRate(teacher));
+        if (type === 'internal') {
+            bucket.internalHours += hours;
+            bucket.internalTeachers.add(teacher);
+        } else {
+            bucket.externalHours += hours;
+            bucket.externalTeachers.add(teacher);
+        }
+    }
+}
+
+function teacherTypeRow(label, bucket) {
+    const totalHours = bucket.internalHours + bucket.externalHours;
+    const internalPct = totalHours > 0 ? bucket.internalHours * 100 / totalHours : 0;
+    const externalPct = totalHours > 0 ? bucket.externalHours * 100 / totalHours : 0;
+    return {
+        'Périmètre': label,
+        'Heures internes': Math.round(bucket.internalHours * 100) / 100,
+        'Internes (%)': `${internalPct.toFixed(1).replace('.', ',')} %`,
+        'Heures externes': Math.round(bucket.externalHours * 100) / 100,
+        'Externes (%)': `${externalPct.toFixed(1).replace('.', ',')} %`,
+        'Nb internes': bucket.internalTeachers.size,
+        'Nb externes': bucket.externalTeachers.size,
+    };
+}
+
+function renderTeacherTypeAnalysis() {
+    const globalBucket = emptyTeacherTypeBucket();
+    const byMonth = {};
+    const byPromo = { P1: emptyTeacherTypeBucket(), P2: emptyTeacherTypeBucket() };
+    const bySubject = {};
+
+    for (const ev of ALL_EVENTS_FLAT) {
+        addEventTeacherType(globalBucket, ev);
+
+        const d = ev.startDt;
+        const monthKey = `${d.getFullYear()}-${fmt2(d.getMonth()+1)}`;
+        if (!byMonth[monthKey]) {
+            byMonth[monthKey] = {
+                label: `${MONTHS_FR[d.getMonth()+1].charAt(0).toUpperCase()}${MONTHS_FR[d.getMonth()+1].slice(1)} ${d.getFullYear()}`,
+                bucket: emptyTeacherTypeBucket()
+            };
+        }
+        addEventTeacherType(byMonth[monthKey].bucket, ev);
+
+        if (!byPromo[ev.promo_label]) byPromo[ev.promo_label] = emptyTeacherTypeBucket();
+        addEventTeacherType(byPromo[ev.promo_label], ev);
+
+        if (!bySubject[ev.summary]) bySubject[ev.summary] = emptyTeacherTypeBucket();
+        addEventTeacherType(bySubject[ev.summary], ev);
+    }
+
+    const totalHours = globalBucket.internalHours + globalBucket.externalHours;
+    const internalPct = totalHours > 0 ? globalBucket.internalHours * 100 / totalHours : 0;
+    const externalPct = totalHours > 0 ? globalBucket.externalHours * 100 / totalHours : 0;
+    document.getElementById('teacher-type-global-metrics').innerHTML = `
+        <div class="metric-card"><div class="metric-value">${internalPct.toFixed(1).replace('.', ',')} %</div><div class="metric-label">Heures internes</div></div>
+        <div class="metric-card"><div class="metric-value">${externalPct.toFixed(1).replace('.', ',')} %</div><div class="metric-label">Heures externes</div></div>
+        <div class="metric-card"><div class="metric-value">${globalBucket.internalTeachers.size}</div><div class="metric-label">Profs internes distincts</div></div>
+        <div class="metric-card"><div class="metric-value">${globalBucket.externalTeachers.size}</div><div class="metric-label">Profs externes distincts</div></div>
+    `;
+
+    const headers = ['Périmètre','Heures internes','Internes (%)','Heures externes','Externes (%)','Nb internes','Nb externes'];
+
+    const monthRows = Object.keys(byMonth).sort().map(k => teacherTypeRow(byMonth[k].label, byMonth[k].bucket));
+    document.getElementById('teacher-type-month-table').innerHTML = monthRows.length
+        ? renderTableHTML(headers, monthRows)
+        : `<tbody><tr><td><div class="empty-state"><i class="bi bi-inbox"></i>Aucune donnée disponible.</div></td></tr></tbody>`;
+
+    const promoRows = ['P1','P2'].filter(p => getPromoEvents(p).length).map(p => teacherTypeRow(p, byPromo[p]));
+    document.getElementById('teacher-type-promo-table').innerHTML = promoRows.length
+        ? renderTableHTML(headers, promoRows)
+        : `<tbody><tr><td><div class="empty-state"><i class="bi bi-inbox"></i>Aucune donnée disponible.</div></td></tr></tbody>`;
+
+    const subjectRows = Object.keys(bySubject)
+        .sort((a,b) => a.localeCompare(b, 'fr', {numeric:true, sensitivity:'base'}))
+        .map(subject => teacherTypeRow(subject, bySubject[subject]));
+    document.getElementById('teacher-type-subject-table').innerHTML = subjectRows.length
+        ? renderTableHTML(headers, subjectRows)
+        : `<tbody><tr><td><div class="empty-state"><i class="bi bi-inbox"></i>Aucune donnée disponible.</div></td></tr></tbody>`;
+}
+
+// ── Jours de présence sur le campus ──
+function isCampusTeachingEvent(ev) {
+    return !IGNORE_SUBJECTS.has(normStr(ev.summary));
+}
+
+function eventDateKey(ev) {
+    const d = ev.startDt;
+    return `${d.getFullYear()}-${fmt2(d.getMonth()+1)}-${fmt2(d.getDate())}`;
+}
+
+function monthKeyFromEvent(ev) {
+    const d = ev.startDt;
+    return `${d.getFullYear()}-${fmt2(d.getMonth()+1)}`;
+}
+
+function monthLabelFromKey(key) {
+    const [year, month] = key.split('-').map(Number);
+    const name = MONTHS_FR[month] || '';
+    return `${name.charAt(0).toUpperCase()}${name.slice(1)} ${year}`;
+}
+
+function renderCampusDaysTable() {
+    const teachingEvents = ALL_EVENTS_FLAT.filter(isCampusTeachingEvent);
+    const months = Array.from(new Set(teachingEvents.map(monthKeyFromEvent))).sort();
+
+    const rows = months.map(monthKey => {
+        const p1Dates = new Set(DATA.events_p1.filter(isCampusTeachingEvent).filter(ev => monthKeyFromEvent(ev) === monthKey).map(eventDateKey));
+        const p2Dates = new Set(DATA.events_p2.filter(isCampusTeachingEvent).filter(ev => monthKeyFromEvent(ev) === monthKey).map(eventDateKey));
+        const globalDates = new Set([...p1Dates, ...p2Dates]);
+        return {
+            'Mois': monthLabelFromKey(monthKey),
+            'P1': p1Dates.size,
+            'P2': p2Dates.size,
+            'Global': globalDates.size,
+        };
+    });
+
+    if (teachingEvents.length) {
+        const allP1 = new Set(DATA.events_p1.filter(isCampusTeachingEvent).map(eventDateKey));
+        const allP2 = new Set(DATA.events_p2.filter(isCampusTeachingEvent).map(eventDateKey));
+        const allGlobal = new Set([...allP1, ...allP2]);
+        rows.push({
+            'Mois': 'TOTAL ANNÉE',
+            'P1': allP1.size,
+            'P2': allP2.size,
+            'Global': allGlobal.size,
+        });
+    }
+
+    const table = document.getElementById('campus-days-table');
+    table.innerHTML = rows.length
+        ? renderTableHTML(['Mois','P1','P2','Global'], rows)
+        : `<tbody><tr><td><div class="empty-state"><i class="bi bi-inbox"></i>Aucune donnée disponible.</div></td></tr></tbody>`;
 }
 
 // ── Budget année scolaire (P1+P2 combinées) ──
