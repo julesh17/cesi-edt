@@ -197,6 +197,10 @@
         table.data-table tbody tr.row-error:hover { background: #f5c2c7; }
 
         .table-scroll { overflow-x: auto; }
+        .sortable-th { cursor: pointer; user-select: none; white-space: nowrap; }
+        .sortable-th:hover { color: var(--accent); }
+        .sortable-th i { font-size: 10px; margin-left: 4px; opacity: .65; }
+        .table-controls-note { font-size: 11px; color: var(--text-3); margin-top: -6px; margin-bottom: 12px; }
 
         textarea.mail-preview {
             width: 100%; min-height: 420px; font-family: 'DM Mono', monospace; font-size: 12.5px;
@@ -547,16 +551,57 @@
     </div>
 
     <div class="panel-card">
-        <h3>Par matière</h3>
-        <div class="table-scroll"><table class="data-table" id="teacher-type-subject-table"></table></div>
+        <h3>Jours de présence sur le campus</h3>
+        <p style="font-size:12px; color:var(--text-2); margin-bottom:14px;">
+            Nombre de dates distinctes où au moins un cours est planifié. Les périodes entreprise, missions en entreprise, jours fériés et autres matières ignorées ne sont pas comptés comme jours de présence.
+        </p>
+        <div class="table-scroll"><table class="data-table" id="campus-days-table"></table></div>
     </div>
 
     <div class="panel-card">
-        <h3>Jours de présence sur le campus</h3>
+        <h3>Heures en autonomie</h3>
         <p style="font-size:12px; color:var(--text-2); margin-bottom:14px;">
-            Nombre de dates distinctes où au moins un cours est planifié. Les périodes entreprise, jours fériés et autres matières ignorées ne sont pas comptés comme jours de présence.
+            Séances sans enseignant, hors périodes/missions en entreprise, jours fériés et autres matières ignorées.
         </p>
-        <div class="table-scroll"><table class="data-table" id="campus-days-table"></table></div>
+        <div class="table-scroll"><table class="data-table" id="autonomy-hours-table"></table></div>
+    </div>
+
+    <div class="panel-card">
+        <h3>Récapitulatif des jours</h3>
+        <p style="font-size:12px; color:var(--text-2); margin-bottom:14px;">
+            Comptage en dates distinctes. Un jour peut être compté à la fois en interne et en externe si les deux types d'enseignants interviennent ce jour-là.
+            Les jours d'animation correspondent aux jours avec au moins un enseignant ; les jours en autonomie correspondent aux jours avec au moins une séance sans enseignant.
+        </p>
+        <div class="table-scroll"><table class="data-table" id="days-summary-table"></table></div>
+    </div>
+
+    <div class="panel-card">
+        <h3>Par matière</h3>
+        <div class="inline-fields" style="margin-bottom:14px;">
+            <div class="field-group" style="margin-bottom:0; min-width:240px; flex:1;">
+                <label class="field-label">Rechercher une matière</label>
+                <input type="text" id="teacher-type-subject-search" placeholder="Ex. électronique, signal…" oninput="renderTeacherTypeSubjectTable()" style="width:100%;">
+            </div>
+            <div class="field-group" style="margin-bottom:0;">
+                <label class="field-label">Promo</label>
+                <select id="teacher-type-subject-promo" onchange="renderTeacherTypeSubjectTable()">
+                    <option value="ALL">P1 + P2</option>
+                    <option value="P1">P1</option>
+                    <option value="P2">P2</option>
+                </select>
+            </div>
+            <div class="field-group" style="margin-bottom:0;">
+                <label class="field-label">Type d'intervention</label>
+                <select id="teacher-type-subject-kind" onchange="renderTeacherTypeSubjectTable()">
+                    <option value="ALL">Tous</option>
+                    <option value="internal">100 % interne</option>
+                    <option value="external">100 % externe</option>
+                    <option value="mixed">Mixte</option>
+                </select>
+            </div>
+        </div>
+        <div class="table-controls-note">Cliquez sur un en-tête pour trier le tableau.</div>
+        <div class="table-scroll"><table class="data-table" id="teacher-type-subject-table"></table></div>
     </div>
 
     <div class="panel-card">
@@ -598,7 +643,8 @@ const DAYS_FR = {1:'Lundi',2:'Mardi',3:'Mercredi',4:'Jeudi',5:'Vendredi',6:'Same
 const IGNORE_SUBJECTS = new Set([
     "erasmus day","forum international","période entreprise","periode entreprise",
     "férié","ferie","mission à l'international","mission a l'international",
-    "matière","matières","divers", "mission en entreprise"
+    "mission en entreprise",
+    "matière","matières","divers"
 ]);
 
 function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
@@ -1392,6 +1438,8 @@ function initBudgetTab() {
     renderBudgetMonthTable();
     renderTeacherTypeAnalysis();
     renderCampusDaysTable();
+    renderAutonomyHoursTable();
+    renderDaysSummaryTable();
     renderBudgetYearMetrics();
 }
 
@@ -1796,7 +1844,6 @@ function renderTeacherTypeAnalysis() {
     const globalBucket = emptyTeacherTypeBucket();
     const byMonth = {};
     const byPromo = { P1: emptyTeacherTypeBucket(), P2: emptyTeacherTypeBucket() };
-    const bySubject = {};
 
     for (const ev of ALL_EVENTS_FLAT) {
         addEventTeacherType(globalBucket, ev);
@@ -1813,9 +1860,6 @@ function renderTeacherTypeAnalysis() {
 
         if (!byPromo[ev.promo_label]) byPromo[ev.promo_label] = emptyTeacherTypeBucket();
         addEventTeacherType(byPromo[ev.promo_label], ev);
-
-        if (!bySubject[ev.summary]) bySubject[ev.summary] = emptyTeacherTypeBucket();
-        addEventTeacherType(bySubject[ev.summary], ev);
     }
 
     const totalHours = globalBucket.internalHours + globalBucket.externalHours;
@@ -1840,12 +1884,85 @@ function renderTeacherTypeAnalysis() {
         ? renderTableHTML(headers, promoRows)
         : `<tbody><tr><td><div class="empty-state"><i class="bi bi-inbox"></i>Aucune donnée disponible.</div></td></tr></tbody>`;
 
-    const subjectRows = Object.keys(bySubject)
-        .sort((a,b) => a.localeCompare(b, 'fr', {numeric:true, sensitivity:'base'}))
-        .map(subject => teacherTypeRow(subject, bySubject[subject]));
-    document.getElementById('teacher-type-subject-table').innerHTML = subjectRows.length
-        ? renderTableHTML(headers, subjectRows)
-        : `<tbody><tr><td><div class="empty-state"><i class="bi bi-inbox"></i>Aucune donnée disponible.</div></td></tr></tbody>`;
+    renderTeacherTypeSubjectTable();
+}
+
+let teacherTypeSubjectSort = { key: 'subject', direction: 'asc' };
+
+function setTeacherTypeSubjectSort(key) {
+    if (teacherTypeSubjectSort.key === key) {
+        teacherTypeSubjectSort.direction = teacherTypeSubjectSort.direction === 'asc' ? 'desc' : 'asc';
+    } else {
+        teacherTypeSubjectSort = { key, direction: key === 'subject' ? 'asc' : 'desc' };
+    }
+    renderTeacherTypeSubjectTable();
+}
+
+function renderTeacherTypeSubjectTable() {
+    const table = document.getElementById('teacher-type-subject-table');
+    if (!table) return;
+
+    const promo = document.getElementById('teacher-type-subject-promo')?.value || 'ALL';
+    const kind = document.getElementById('teacher-type-subject-kind')?.value || 'ALL';
+    const search = normStr(document.getElementById('teacher-type-subject-search')?.value || '');
+    const events = ALL_EVENTS_FLAT.filter(ev => promo === 'ALL' || ev.promo_label === promo);
+    const bySubject = {};
+
+    for (const ev of events) {
+        if (!bySubject[ev.summary]) bySubject[ev.summary] = emptyTeacherTypeBucket();
+        addEventTeacherType(bySubject[ev.summary], ev);
+    }
+
+    let rows = Object.entries(bySubject).map(([subject, bucket]) => {
+        const totalHours = bucket.internalHours + bucket.externalHours;
+        if (totalHours <= 0) return null;
+        const internalPct = bucket.internalHours * 100 / totalHours;
+        const externalPct = bucket.externalHours * 100 / totalHours;
+        const rowKind = internalPct === 100 ? 'internal' : (externalPct === 100 ? 'external' : 'mixed');
+        return {
+            subject, rowKind,
+            internalHours: bucket.internalHours, internalPct,
+            externalHours: bucket.externalHours, externalPct,
+            internalCount: bucket.internalTeachers.size, externalCount: bucket.externalTeachers.size
+        };
+    }).filter(Boolean);
+
+    rows = rows.filter(r => (!search || normStr(r.subject).includes(search)) && (kind === 'ALL' || r.rowKind === kind));
+
+    const dir = teacherTypeSubjectSort.direction === 'asc' ? 1 : -1;
+    rows.sort((a,b) => {
+        const key = teacherTypeSubjectSort.key;
+        if (key === 'subject') return a.subject.localeCompare(b.subject, 'fr', {numeric:true, sensitivity:'base'}) * dir;
+        return ((a[key] || 0) - (b[key] || 0)) * dir;
+    });
+
+    const cols = [
+        ['subject','Matière'], ['internalHours','Heures internes'], ['internalPct','Internes (%)'],
+        ['externalHours','Heures externes'], ['externalPct','Externes (%)'],
+        ['internalCount','Nb internes'], ['externalCount','Nb externes']
+    ];
+    const arrow = key => teacherTypeSubjectSort.key === key
+        ? (teacherTypeSubjectSort.direction === 'asc' ? 'bi-caret-up-fill' : 'bi-caret-down-fill')
+        : 'bi-arrow-down-up';
+
+    if (!rows.length) {
+        table.innerHTML = `<tbody><tr><td><div class="empty-state"><i class="bi bi-search"></i>Aucune matière ne correspond aux filtres.</div></td></tr></tbody>`;
+        return;
+    }
+
+    table.innerHTML = `
+        <thead><tr>${cols.map(([key,label]) => `<th class="sortable-th" onclick="setTeacherTypeSubjectSort('${key}')">${label}<i class="bi ${arrow(key)}"></i></th>`).join('')}</tr></thead>
+        <tbody>${rows.map(r => `
+            <tr>
+                <td><strong>${esc(r.subject)}</strong></td>
+                <td>${Math.round(r.internalHours * 100) / 100}</td>
+                <td>${r.internalPct.toFixed(1).replace('.', ',')} %</td>
+                <td>${Math.round(r.externalHours * 100) / 100}</td>
+                <td>${r.externalPct.toFixed(1).replace('.', ',')} %</td>
+                <td>${r.internalCount}</td>
+                <td>${r.externalCount}</td>
+            </tr>`).join('')}
+        </tbody>`;
 }
 
 // ── Jours de présence sur le campus ──
@@ -1900,6 +2017,89 @@ function renderCampusDaysTable() {
     const table = document.getElementById('campus-days-table');
     table.innerHTML = rows.length
         ? renderTableHTML(['Mois','P1','P2','Global'], rows)
+        : `<tbody><tr><td><div class="empty-state"><i class="bi bi-inbox"></i>Aucune donnée disponible.</div></td></tr></tbody>`;
+}
+
+// ── Heures en autonomie ──
+function isAutonomyEvent(ev) {
+    const teachers = (ev.teachers || []).filter(Boolean);
+    return isCampusTeachingEvent(ev) && teachers.length === 0;
+}
+
+function renderAutonomyHoursTable() {
+    const autonomyEvents = ALL_EVENTS_FLAT.filter(isAutonomyEvent);
+    const months = Array.from(new Set(autonomyEvents.map(monthKeyFromEvent))).sort();
+    const rows = months.map(monthKey => {
+        const p1 = DATA.events_p1.filter(isAutonomyEvent).filter(ev => monthKeyFromEvent(ev) === monthKey).reduce((s,ev) => s + durH(ev), 0);
+        const p2 = DATA.events_p2.filter(isAutonomyEvent).filter(ev => monthKeyFromEvent(ev) === monthKey).reduce((s,ev) => s + durH(ev), 0);
+        return {
+            'Mois': monthLabelFromKey(monthKey),
+            'P1 (h)': Math.round(p1 * 100) / 100,
+            'P2 (h)': Math.round(p2 * 100) / 100,
+            'Total (h)': Math.round((p1 + p2) * 100) / 100
+        };
+    });
+
+    if (rows.length) {
+        const p1Total = DATA.events_p1.filter(isAutonomyEvent).reduce((s,ev) => s + durH(ev), 0);
+        const p2Total = DATA.events_p2.filter(isAutonomyEvent).reduce((s,ev) => s + durH(ev), 0);
+        rows.push({
+            'Mois': 'TOTAL ANNÉE',
+            'P1 (h)': Math.round(p1Total * 100) / 100,
+            'P2 (h)': Math.round(p2Total * 100) / 100,
+            'Total (h)': Math.round((p1Total + p2Total) * 100) / 100
+        });
+    }
+
+    const table = document.getElementById('autonomy-hours-table');
+    table.innerHTML = rows.length
+        ? renderTableHTML(['Mois','P1 (h)','P2 (h)','Total (h)'], rows)
+        : `<tbody><tr><td><div class="empty-state"><i class="bi bi-inbox"></i>Aucune heure en autonomie.</div></td></tr></tbody>`;
+}
+
+// ── Récapitulatif en jours : animation / internes / autonomie / externes ──
+function uniqueDayCount(events, predicate) {
+    return new Set(events.filter(isCampusTeachingEvent).filter(predicate).map(eventDateKey)).size;
+}
+
+function hasInternalTeacher(ev) {
+    return (ev.teachers || []).filter(Boolean).some(t => teacherTypeFromRate(getTeacherRate(t)) === 'internal');
+}
+
+function hasExternalTeacher(ev) {
+    return (ev.teachers || []).filter(Boolean).some(t => teacherTypeFromRate(getTeacherRate(t)) === 'external');
+}
+
+function hasAnyTeacher(ev) {
+    return (ev.teachers || []).filter(Boolean).length > 0;
+}
+
+function daysSummaryRow(label, events) {
+    return {
+        'Périmètre': label,
+        'Nombre total de jours d’animation': uniqueDayCount(events, hasAnyTeacher),
+        'Nombre de jour avec des enseignants internes': uniqueDayCount(events, hasInternalTeacher),
+        'Nombre de jour en autonomie': uniqueDayCount(events, ev => !hasAnyTeacher(ev)),
+        'Nombre de jour avec des enseignants externes': uniqueDayCount(events, hasExternalTeacher)
+    };
+}
+
+function renderDaysSummaryTable() {
+    const rows = [];
+    if (DATA.events_p1.length) rows.push(daysSummaryRow('P1', DATA.events_p1));
+    if (DATA.events_p2.length) rows.push(daysSummaryRow('P2', DATA.events_p2));
+    if (ALL_EVENTS_FLAT.length) rows.push(daysSummaryRow('Global', ALL_EVENTS_FLAT));
+
+    const headers = [
+        'Périmètre',
+        'Nombre total de jours d’animation',
+        'Nombre de jour avec des enseignants internes',
+        'Nombre de jour en autonomie',
+        'Nombre de jour avec des enseignants externes'
+    ];
+    const table = document.getElementById('days-summary-table');
+    table.innerHTML = rows.length
+        ? renderTableHTML(headers, rows)
         : `<tbody><tr><td><div class="empty-state"><i class="bi bi-inbox"></i>Aucune donnée disponible.</div></td></tr></tbody>`;
 }
 
