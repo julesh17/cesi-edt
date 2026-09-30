@@ -612,7 +612,6 @@
 
 <script>
 const SLUG = "{{ slug }}";
-const BASE_URL = "{{ request.base_url }}";
 const ICS_BASE_URL = "https://edt.cesi-tools.workers.dev/";
 </script>
 <script>
@@ -661,7 +660,7 @@ function fmtEUR(n) {
 // ── CHARGEMENT DES DONNEES ──
 async function loadDashboardData() {
     try {
-        const res = await fetch(`${BASE_URL}api/dashboard-data/${SLUG}`);
+        const res = await fetch(`/api/dashboard-data/${encodeURIComponent(SLUG)}`);
         if (!res.ok) throw new Error('fetch failed');
         const data = await res.json();
         DATA.events_p1 = (data.events_p1 || []).map(ev => ({...ev, startDt: new Date(ev.start), endDt: new Date(ev.end), promo_label: 'P1'}));

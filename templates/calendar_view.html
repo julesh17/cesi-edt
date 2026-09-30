@@ -217,7 +217,6 @@
 
 <script>
 const SLUG     = "{{ slug }}";
-const BASE_URL = "{{ request.base_url }}";
 
 // Registre global : chaque événement rendu reçoit un index numérique
 // évite tout problème de sérialisation JSON dans les attributs HTML
@@ -251,7 +250,7 @@ function getColor(title) {
 async function loadEvents(group) {
     if (dataLoaded[group]) return;
     try {
-        const res = await fetch(`${BASE_URL}api/events/${SLUG}/${group}`);
+        const res = await fetch(`/api/events/${encodeURIComponent(SLUG)}/${encodeURIComponent(group)}`);
         if (!res.ok) throw new Error();
         const data = await res.json();
         allEvents[group] = data.map(ev => ({
