@@ -613,6 +613,7 @@
 <script>
 const SLUG = "{{ slug }}";
 const BASE_URL = "{{ request.base_url }}";
+const ICS_BASE_URL = "https://edt.cesi-tools.workers.dev/";
 </script>
 <script>
 // ==========================================================
@@ -715,7 +716,7 @@ function initMailsTab() {
 }
 
 function teacherSubscriptionUrl(teacher) {
-    return `${BASE_URL}ics/${encodeURIComponent(SLUG)}/enseignant.ics?teacher=${encodeURIComponent(teacher)}`;
+    return `${ICS_BASE_URL}ics/${encodeURIComponent(SLUG)}/enseignant.ics?teacher=${encodeURIComponent(teacher)}`;
 }
 
 function setMailTone(tone) {
