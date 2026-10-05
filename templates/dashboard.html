@@ -569,8 +569,10 @@
     <div class="panel-card">
         <h3>Récapitulatif des jours</h3>
         <p style="font-size:12px; color:var(--text-2); margin-bottom:14px;">
-            Comptage en dates distinctes. Un jour peut être compté à la fois en interne et en externe si les deux types d'enseignants interviennent ce jour-là.
-            Les jours d'animation correspondent aux jours avec au moins un enseignant ; les jours en autonomie correspondent aux jours avec au moins une séance sans enseignant.
+            Conversion des heures en jours sur une base de 8 h = 1 jour.
+            Les jours d'animation, internes, externes et d'autonomie sont calculés à partir des volumes horaires, et non du nombre de dates distinctes.
+            En cas de co-enseignement, les heures de chaque enseignant sont comptabilisées dans son type d'intervention.
+            Le tableau « Jours de présence sur le campus » reste, lui, basé sur le nombre de dates distinctes.
         </p>
         <div class="table-scroll"><table class="data-table" id="days-summary-table"></table></div>
     </div>
@@ -2057,30 +2059,34 @@ function renderAutonomyHoursTable() {
         : `<tbody><tr><td><div class="empty-state"><i class="bi bi-inbox"></i>Aucune heure en autonomie.</div></td></tr></tbody>`;
 }
 
-// ── Récapitulatif en jours : animation / internes / autonomie / externes ──
-function uniqueDayCount(events, predicate) {
-    return new Set(events.filter(isCampusTeachingEvent).filter(predicate).map(eventDateKey)).size;
-}
-
-function hasInternalTeacher(ev) {
-    return (ev.teachers || []).filter(Boolean).some(t => teacherTypeFromRate(getTeacherRate(t)) === 'internal');
-}
-
-function hasExternalTeacher(ev) {
-    return (ev.teachers || []).filter(Boolean).some(t => teacherTypeFromRate(getTeacherRate(t)) === 'external');
-}
-
-function hasAnyTeacher(ev) {
-    return (ev.teachers || []).filter(Boolean).length > 0;
+// ── Récapitulatif en jours : conversion des heures sur une base de 8 h / jour ──
+function hoursToDays(hours) {
+    return Math.round((hours / 8) * 100) / 100;
 }
 
 function daysSummaryRow(label, events) {
+    // Même périmètre que les jours de présence : on exclut entreprise, fériés, etc.
+    const teachingEvents = events.filter(isCampusTeachingEvent);
+
+    // Les heures internes / externes sont des heures-enseignant :
+    // en co-enseignement, chaque enseignant compte pour la durée de la séance.
+    const teacherBucket = emptyTeacherTypeBucket();
+    for (const ev of teachingEvents) {
+        addEventTeacherType(teacherBucket, ev);
+    }
+
+    const autonomyHours = teachingEvents
+        .filter(ev => (ev.teachers || []).filter(Boolean).length === 0)
+        .reduce((sum, ev) => sum + durH(ev), 0);
+
+    const animationHours = teacherBucket.internalHours + teacherBucket.externalHours;
+
     return {
         'Périmètre': label,
-        'Nombre total de jours d’animation': uniqueDayCount(events, hasAnyTeacher),
-        'Nombre de jour avec des enseignants internes': uniqueDayCount(events, hasInternalTeacher),
-        'Nombre de jour en autonomie': uniqueDayCount(events, ev => !hasAnyTeacher(ev)),
-        'Nombre de jour avec des enseignants externes': uniqueDayCount(events, hasExternalTeacher)
+        'Nombre total de jours d’animation': hoursToDays(animationHours),
+        'Nombre de jours avec des enseignants internes': hoursToDays(teacherBucket.internalHours),
+        'Nombre de jours en autonomie': hoursToDays(autonomyHours),
+        'Nombre de jours avec des enseignants externes': hoursToDays(teacherBucket.externalHours)
     };
 }
 
@@ -2093,9 +2099,9 @@ function renderDaysSummaryTable() {
     const headers = [
         'Périmètre',
         'Nombre total de jours d’animation',
-        'Nombre de jour avec des enseignants internes',
-        'Nombre de jour en autonomie',
-        'Nombre de jour avec des enseignants externes'
+        'Nombre de jours avec des enseignants internes',
+        'Nombre de jours en autonomie',
+        'Nombre de jours avec des enseignants externes'
     ];
     const table = document.getElementById('days-summary-table');
     table.innerHTML = rows.length
