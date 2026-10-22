@@ -1849,11 +1849,15 @@ function cfaiMonthlyTotals(events) {
     for (const ev of events) {
         if (!isCampusTeachingEvent(ev)) continue;
         const month = monthKeyFromEvent(ev);
-        if (!months[month]) months[month] = { p1: 0, p2: 0, trainer: 0 };
+        if (!months[month]) months[month] = { p1: 0, p2: 0, trainerP1: 0, trainerP2: 0 };
         const hours = cfaiSessionHours(ev);
-        if (ev.promo_label === 'P1') months[month].p1 += hours.student;
-        else if (ev.promo_label === 'P2') months[month].p2 += hours.student;
-        months[month].trainer += hours.trainer;
+        if (ev.promo_label === 'P1') {
+            months[month].p1 += hours.student;
+            months[month].trainerP1 += hours.trainer;
+        } else if (ev.promo_label === 'P2') {
+            months[month].p2 += hours.student;
+            months[month].trainerP2 += hours.trainer;
+        }
     }
     return months;
 }
@@ -1861,26 +1865,29 @@ function cfaiMonthlyTotals(events) {
 function renderCfaiHoursTable() {
     const months = cfaiMonthlyTotals(ALL_EVENTS_FLAT);
     const monthKeys = Object.keys(months).sort();
-    const headers = ['Mois', 'Heures étudiants P1', 'Heures étudiants P2', 'Heures formateurs'];
-    const total = { p1: 0, p2: 0, trainer: 0 };
+    const headers = ['Mois', 'Heures étudiants P1', 'Heures étudiants P2', 'Heures formateurs P1', 'Heures formateurs P2'];
+    const total = { p1: 0, p2: 0, trainerP1: 0, trainerP2: 0 };
     const roundHours = hours => Math.round(hours * 100) / 100;
     const rows = monthKeys.map(key => {
         const m = months[key];
         total.p1 += m.p1;
         total.p2 += m.p2;
-        total.trainer += m.trainer;
+        total.trainerP1 += m.trainerP1;
+        total.trainerP2 += m.trainerP2;
         return {
             'Mois': monthLabelFromKey(key),
             'Heures étudiants P1': roundHours(m.p1),
             'Heures étudiants P2': roundHours(m.p2),
-            'Heures formateurs': roundHours(m.trainer)
+            'Heures formateurs P1': roundHours(m.trainerP1),
+            'Heures formateurs P2': roundHours(m.trainerP2)
         };
     });
     if (rows.length) rows.push({
         'Mois': 'TOTAL ANNÉE',
         'Heures étudiants P1': roundHours(total.p1),
         'Heures étudiants P2': roundHours(total.p2),
-        'Heures formateurs': roundHours(total.trainer)
+        'Heures formateurs P1': roundHours(total.trainerP1),
+        'Heures formateurs P2': roundHours(total.trainerP2)
     });
     document.getElementById('cfai-hours-table').innerHTML = rows.length
         ? renderTableHTML(headers, rows, row => row.Mois === 'TOTAL ANNÉE' ? 'row-total' : '')

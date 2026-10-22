@@ -35,13 +35,17 @@ const outputs = vm.runInContext(`
     JSON.stringify(cfaiMonthlyTotals(ALL_EVENTS_FLAT));
 `, context);
 const months = JSON.parse(outputs);
-assert.deepEqual(months['2026-10'], { p1: 7, p2: 6, trainer: 16 });
-assert.deepEqual(months['2026-11'], { p1: 0, p2: 1, trainer: 4 });
+assert.deepEqual(months['2026-10'], { p1: 7, p2: 6, trainerP1: 12, trainerP2: 4 });
+assert.deepEqual(months['2026-11'], { p1: 0, p2: 1, trainerP1: 0, trainerP2: 4 });
 assert.match(elements['cfai-hours-table'].innerHTML, /Heures étudiants P1/);
+assert.match(elements['cfai-hours-table'].innerHTML, /Heures formateurs P1/);
+assert.match(elements['cfai-hours-table'].innerHTML, /Heures formateurs P2/);
+assert.match(elements['cfai-hours-table'].innerHTML, /<td[^>]*>12<\/td>/); // 12 h formateurs P1 en octobre
+assert.match(elements['cfai-hours-table'].innerHTML, /<td[^>]*>4<\/td>/); // 4 h formateurs P2 en octobre
 assert.match(elements['cfai-hours-table'].innerHTML, /TOTAL ANNÉE/);
 assert.match(elements['cfai-hours-table'].innerHTML, /row-total/);
 assert.equal((elements['cfai-hours-table'].innerHTML.match(/<tr/g) || []).length, 4);
 
 for (const id of ['panel-volume-horaire', 'panel-budget']) assert.ok(html.includes('id="' + id + '"'));
 assert.equal((html.match(/id="cfai-hours-table"/g) || []).length, 1);
-console.log('OK : volumes P1/P2, demi-groupes, co-animation, autonomie, exclusions et tableau annuel.');
+console.log('OK : volumes étudiants/formateurs distincts P1/P2, demi-groupes, co-animation, autonomie, exclusions et tableau annuel.');

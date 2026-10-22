@@ -716,7 +716,7 @@ Projet développé par Jules Hamdan, ERP à CESI Toulouse, pour les équipes pé
 Le tableau de bord possède un onglet **Volume horaire**, distinct de **Budget**.
 Il commence par « Suivi mensuel des heures étudiants et formateurs (pour le CFAI) »,
 avec les colonnes **Mois**, **Heures étudiants P1**, **Heures étudiants P2**
-et **Heures formateurs**, puis une ligne **TOTAL ANNÉE**.
+et **Heures formateurs P1**, **Heures formateurs P2**, puis une ligne **TOTAL ANNÉE**.
 
 Les heures sont calculées sur les séances de cours du planning :
 
@@ -724,8 +724,8 @@ Les heures sont calculées sur les séances de cours du planning :
   contenant les deux groupes) ; moitié de la durée si elle concerne un seul
   demi-groupe (`groups` contient uniquement `G 1` ou `G 2`). Chaque séance
   répétée pour l'autre groupe apporte sa propre moitié.
-- **Formateurs** : durée multipliée par le nombre d'enseignants distincts
-  associés à la séance. Deux enseignants simultanés comptent deux fois ; les
+- **Formateurs P1/P2** : durée multipliée par le nombre d'enseignants distincts
+  associés à la séance, affectée à la colonne de la promotion correspondante. Deux enseignants simultanés comptent deux fois ; les
   deux passages d'un TP en demi-groupe sont additionnés.
 - **Autonomie** : les séances sans formateur sont incluses dans les heures
   étudiants, mais apportent zéro heure formateur.
