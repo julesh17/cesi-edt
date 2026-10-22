@@ -709,3 +709,30 @@ L’architecture ne nécessite pas de serveur géré manuellement. Vercel prend 
 ## Auteur
 
 Projet développé par Jules Hamdan, ERP à CESI Toulouse, pour les équipes pédagogiques de CESI afin de simplifier la gestion des emplois du temps et la diffusion des calendriers.
+
+
+## Volume horaire — suivi CFAI
+
+Le tableau de bord possède un onglet **Volume horaire**, distinct de **Budget**.
+Il commence par « Suivi mensuel des heures étudiants et formateurs (pour le CFAI) »,
+avec les colonnes **Mois**, **Heures étudiants P1**, **Heures étudiants P2**
+et **Heures formateurs**, puis une ligne **TOTAL ANNÉE**.
+
+Les heures sont calculées sur les séances de cours du planning :
+
+- **Étudiants** : durée de la séance pour la promotion entière (`groups` vide ou
+  contenant les deux groupes) ; moitié de la durée si elle concerne un seul
+  demi-groupe (`groups` contient uniquement `G 1` ou `G 2`). Chaque séance
+  répétée pour l'autre groupe apporte sa propre moitié.
+- **Formateurs** : durée multipliée par le nombre d'enseignants distincts
+  associés à la séance. Deux enseignants simultanés comptent deux fois ; les
+  deux passages d'un TP en demi-groupe sont additionnés.
+- **Autonomie** : les séances sans formateur sont incluses dans les heures
+  étudiants, mais apportent zéro heure formateur.
+- **Exclusions** : les périodes en entreprise, les missions en entreprise, les
+  jours fériés et les autres matières de `IGNORE_SUBJECTS` ne sont pas incluses.
+
+Les anciens blocs « Répartition enseignants internes / externes », « Par mois »,
+« Par promo », « Jours de présence sur le campus », « Heures en autonomie »,
+« Récapitulatif des jours » et « Par matière » ont été déplacés dans cet onglet.
+Les calculs de coûts et les budgets mensuels et annuels restent dans « Budget ».
