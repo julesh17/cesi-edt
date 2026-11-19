@@ -663,7 +663,7 @@ Cette organisation permet de charger l’ensemble des informations d’une promo
 
 ## Déploiement
 
-CESI-EDT est déployé sur **Vercel**.
+CESI-EDT est déployé sur **Vercel**.`
 
 Le fichier `vercel.json` indique à Vercel comment exécuter l’application FastAPI située dans `api/main.py`.
 
@@ -719,12 +719,7 @@ L’architecture ne nécessite pas de serveur géré manuellement. Vercel prend 
 
 ---
 
-## Auteur
-
-Projet développé par Jules Hamdan, ERP à CESI Toulouse, pour les équipes pédagogiques de CESI afin de simplifier la gestion des emplois du temps et la diffusion des calendriers.
-
-
-## Volume horaire — suivi CFAI
+## Volume horaire - suivi CFAI
 
 Le tableau de bord possède un onglet **Volume horaire**, distinct de **Budget**.
 Il commence par « Suivi mensuel des heures étudiants et formateurs (pour le CFAI) »,
@@ -745,7 +740,8 @@ Les heures sont calculées sur les séances de cours du planning :
 - **Exclusions** : les périodes en entreprise, les missions en entreprise, les
   jours fériés et les autres matières de `IGNORE_SUBJECTS` ne sont pas incluses.
 
-Les anciens blocs « Répartition enseignants internes / externes », « Par mois »,
-« Par promo », « Jours de présence sur le campus », « Heures en autonomie »,
-« Récapitulatif des jours » et « Par matière » ont été déplacés dans cet onglet.
-Les calculs de coûts et les budgets mensuels et annuels restent dans « Budget ».
+---
+
+## Auteur
+
+Projet développé par Jules Hamdan, ERP à CESI Toulouse, pour les équipes pédagogiques de CESI afin de simplifier la gestion des emplois du temps et la diffusion des calendriers.
