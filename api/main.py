@@ -1870,17 +1870,31 @@ async def get_teacher_ics_file(slug: str, teacher: str, request: Request):
         raise HTTPException(500, detail="Erreur interne")
 
 
+def filter_events_for_subgroup(events: List[dict], subgroup: str) -> List[dict]:
+    """Séances d'un demi-groupe, y compris celles communes à toute la promo.
+
+    Une liste de groupes vide indique une séance de promotion entière.
+    Les libellés G1, G 1, G.1 (etc.) sont normalisés avant comparaison.
+    """
+    return [
+        ev for ev in events
+        if not (groups := normalized_event_groups(ev)) or subgroup in groups
+    ]
+
+
 @app.api_route("/ics/{slug}/{group}.ics", methods=["GET", "HEAD"])
 async def get_ics_file(slug: str, group: str, request: Request):
-    """Flux ICS public P1/P2, compatible abonnement Thunderbird/Outlook."""
+    """Flux ICS P1/P2 historiques et nouveaux flux P1-G1/G2, P2-G1/G2."""
     group_clean = group.upper()
-    if group_clean not in ["P1", "P2"]:
-        raise HTTPException(404, detail="Groupe inconnu (utiliser P1 ou P2)")
+    match = re.fullmatch(r"(P[12])(?:-(G[12]))?", group_clean)
+    if not match:
+        raise HTTPException(404, detail="Calendrier inconnu (P1, P2, P1-G1, P1-G2, P2-G1, P2-G2)")
+    promo, subgroup_code = match.groups()
 
     try:
         res = (
             supabase.table("plannings")
-            .select(f"events_{group_clean.lower()}")
+            .select(f"events_{promo.lower()}")
             .ilike("slug", slug)
             .execute()
         )
@@ -1888,9 +1902,15 @@ async def get_ics_file(slug: str, group: str, request: Request):
         if not res.data:
             raise HTTPException(404, detail="Planning introuvable")
 
-        events_json = res.data[0].get(f"events_{group_clean.lower()}", []) or []
+        events_json = res.data[0].get(f"events_{promo.lower()}", []) or []
+        if subgroup_code:
+            events_json = filter_events_for_subgroup(
+                events_json, f"G {subgroup_code[1:]}"
+            )
+
         ics_content = events_to_ics_string(
             events_json,
+            # Ne pas modifier les UID des abonnements P1/P2 existants.
             uid_namespace=f"{slug}:{group_clean}",
         )
         ics_bytes = ics_content.encode("utf-8")

@@ -124,6 +124,10 @@ Ces informations peuvent être filtrées par enseignant ou par promotion.
 Une fois les vérifications terminées, récupérer les liens d'abonnement ICS.
 
 Chaque enseignant et chaque promotion disposent de leur propre calendrier.
+Un volet optionnel « Liens ICS par demi-groupe » sur l'accueil permet aussi de
+copier les abonnements P1/G1, P1/G2, P2/G1 et P2/G2. Ils incluent chacun les
+séances de leur demi-groupe et les séances communes à la promotion. Les liens
+P1/P2 déjà distribués ne changent pas et restent utilisables.
 
 Les utilisateurs peuvent ensuite s'abonner à leur calendrier depuis Outlook, Google Calendar, Apple Calendar ou toute autre application compatible.
 
@@ -474,7 +478,12 @@ Des flux distincts sont disponibles pour :
 
 - la promotion P1 ;
 - la promotion P2 ;
+- chaque demi-groupe de chaque promotion (P1/G1, P1/G2, P2/G1, P2/G2), en option ;
 - chaque enseignant.
+
+Les nouveaux abonnements G1/G2 affichent également les séances sans groupe
+spécifique (séances communes à toute la promotion), et les séances explicitement
+affectées aux deux groupes. Les abonnements P1/P2 existants sont inchangés.
 
 ```mermaid
 flowchart LR
@@ -568,6 +577,10 @@ La consultation publique des calendriers et les flux ICS ne nécessitent pas de 
 |---|---|
 | `/ics/{slug}/P1.ics` | Calendrier de P1 |
 | `/ics/{slug}/P2.ics` | Calendrier de P2 |
+| `/ics/{slug}/p1-g1.ics` | P1, G1 + séances communes |
+| `/ics/{slug}/p1-g2.ics` | P1, G2 + séances communes |
+| `/ics/{slug}/p2-g1.ics` | P2, G1 + séances communes |
+| `/ics/{slug}/p2-g2.ics` | P2, G2 + séances communes |
 | `/ics/{slug}/enseignant.ics?teacher=...` | Calendrier d’un enseignant |
 
 ### API JSON

@@ -117,6 +117,32 @@
         }
         .btn-copy:hover { color: var(--accent); transform: translateY(-1px); }
 
+        .ics-subgroup-options {
+            border: 1px solid #e5e5e5;
+            border-radius: 12px;
+            background: #fbfbfd;
+        }
+        .ics-subgroup-options summary {
+            list-style: none;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 11px 13px;
+            color: var(--accent);
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            gap: 8px;
+        }
+        .ics-subgroup-options summary::-webkit-details-marker { display: none; }
+        .ics-subgroup-options summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+        .ics-subgroup-chevron { transition: transform 0.2s; }
+        .ics-subgroup-options[open] .ics-subgroup-chevron { transform: rotate(180deg); }
+        .ics-subgroup-content { padding: 0 13px 12px; }
+        .ics-subgroup-promo-title { font-size: 11px; color: var(--text-primary); font-weight: 700; margin-bottom: 8px; }
+        .ics-subgroup-content .input-group-code { background: #fff; }
+        .ics-subgroup-content .input-group-code input { min-width: 0; font-size: 11px; }
+
         .badge-year {
             background-color: #f5f5f7;
             color: var(--text-secondary);
@@ -314,6 +340,43 @@
                             </button>
                         </div>
                     </div>
+
+                    <details class="ics-subgroup-options mb-4">
+                        <summary>
+                            <span><i class="bi bi-people me-2"></i>Liens ICS par demi-groupe (optionnel)</span>
+                            <i class="bi bi-chevron-down ics-subgroup-chevron" aria-hidden="true"></i>
+                        </summary>
+                        <div class="ics-subgroup-content">
+                            <p class="text-muted small mb-3">
+                                Chaque lien contient les séances de G1 ou G2 <strong>et</strong> celles communes à toute sa promotion.
+                                Les liens P1 et P2 ci-dessus restent inchangés.
+                            </p>
+                            {% for promo in ['p1', 'p2'] %}
+                            <div class="ics-subgroup-promo{% if not loop.last %} mb-3{% endif %}">
+                                <div class="ics-subgroup-promo-title">{{ promo | upper }}</div>
+                                {% for subgroup in [1, 2] %}
+                                <div class="mb-2">
+                                    <label class="small text-muted fw-bold mb-1 d-block" style="font-size:11px;">
+                                        {{ promo | upper }} / G{{ subgroup }}
+                                    </label>
+                                    <div class="input-group-code">
+                                        <input type="text" readonly class="form-control"
+                                               value="https://edt.cesi-tools.workers.dev/ics/{{ p.slug }}/{{ promo }}-g{{ subgroup }}.ics"
+                                               id="link-{{ promo }}-g{{ subgroup }}-{{ p.slug }}"
+                                               aria-label="Lien ICS {{ promo | upper }} G{{ subgroup }}">
+                                        <button type="button" class="btn-copy"
+                                                onclick="copyToClipboard('link-{{ promo }}-g{{ subgroup }}-{{ p.slug }}', this)"
+                                                title="Copier le lien {{ promo | upper }} G{{ subgroup }}"
+                                                aria-label="Copier le lien ICS {{ promo | upper }} G{{ subgroup }}">
+                                            <i class="bi bi-clipboard"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                                {% endfor %}
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </details>
 
                     <form action="/upload/{{ p.slug }}" method="post" enctype="multipart/form-data" class="mb-3">
                         <label class="small text-muted fw-bold mb-2 d-flex align-items-center" style="font-size: 11px;">
