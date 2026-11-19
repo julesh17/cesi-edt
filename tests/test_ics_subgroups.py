@@ -35,11 +35,15 @@ PLANNING = {
         event("P1-G2", ["G 2"]),
         event("P1-DEUX", ["G 1", "G 2"]),
         event("P1-VARIANTE", ["G.1"]),
+        event("P1-ATELIER", ["Atelier Bleu"]),
+        event("P1-GROUPE-ALT", ["Groupe A"]),
+        event("P1-TP-G1", ["TP G1"]),
     ],
     "events_p2": [
         event("P2-COMMUN"),
         event("P2-G1", ["G1"]),
         event("P2-G2", ["G 2"]),
+        event("P2-ACCENT", ["Équipe spéciale"]),
     ],
 }
 
@@ -118,8 +122,8 @@ def assert_has_titles(response, expected, excluded=()):
 def test_p1_and_p2_legacy_subscriptions_unchanged():
     main = import_app()
     for promo, names in [
-        ("p1", ["P1-COMMUN", "P1-G1", "P1-G2", "P1-DEUX", "P1-VARIANTE"]),
-        ("p2", ["P2-COMMUN", "P2-G1", "P2-G2"]),
+        ("p1", ["P1-COMMUN", "P1-G1", "P1-G2", "P1-DEUX", "P1-VARIANTE", "P1-ATELIER", "P1-GROUPE-ALT", "P1-TP-G1"]),
+        ("p2", ["P2-COMMUN", "P2-G1", "P2-G2", "P2-ACCENT"]),
     ]:
         response = request(main.app, f"/ics/test-promo/{promo}.ics")
         assert_has_titles(response, names)
@@ -133,10 +137,10 @@ def test_p1_and_p2_legacy_subscriptions_unchanged():
 def test_subgroup_subscriptions_include_common_courses():
     main = import_app()
     scenarios = {
-        "p1-g1": (["P1-COMMUN", "P1-G1", "P1-DEUX", "P1-VARIANTE"], ["P1-G2"]),
-        "p1-g2": (["P1-COMMUN", "P1-G2", "P1-DEUX"], ["P1-G1", "P1-VARIANTE"]),
-        "p2-g1": (["P2-COMMUN", "P2-G1"], ["P2-G2"]),
-        "p2-g2": (["P2-COMMUN", "P2-G2"], ["P2-G1"]),
+        "p1-g1": (["P1-COMMUN", "P1-G1", "P1-DEUX", "P1-VARIANTE"], ["P1-G2", "P1-TP-G1", "P1-ATELIER"]),
+        "p1-g2": (["P1-COMMUN", "P1-G2", "P1-DEUX"], ["P1-G1", "P1-VARIANTE", "P1-ATELIER"]),
+        "p2-g1": (["P2-COMMUN", "P2-G1"], ["P2-G2", "P2-ACCENT"]),
+        "p2-g2": (["P2-COMMUN", "P2-G2"], ["P2-G1", "P2-ACCENT"]),
     }
     for group, (expected, excluded) in scenarios.items():
         response = request(main.app, f"/ics/test-promo/{group}.ics")
@@ -158,7 +162,58 @@ def test_head_and_invalid_links():
     assert request(main.app, "/ics/not-found/p1-g1.ics").status_code == 404
 
 
-def test_home_page_still_displays_original_links_and_optional_subgroups():
+def test_named_subgroups_are_discovered_and_linked():
+    main = import_app()
+    result = request(main.app, "/api/ics-subgroups/test-promo")
+    assert result.status_code == 200
+    data = result.json()
+    for promo in ("p1", "p2"):
+        entries = data[promo]
+        assert len(entries) == len({e["url"] for e in entries})
+        assert any(x["label"] == "G1" and x["url"].endswith(f"/{promo}-g1.ics") for x in entries)
+        assert any(x["label"] == "G2" and x["url"].endswith(f"/{promo}-g2.ics") for x in entries)
+
+    for label, expected, excluded in [
+        ("Atelier Bleu", ["P1-COMMUN", "P1-ATELIER"], ["P1-G1", "P1-G2", "P1-TP-G1"]),
+        ("Groupe A", ["P1-COMMUN", "P1-GROUPE-ALT"], ["P1-G1", "P1-G2"]),
+        ("TP G1", ["P1-COMMUN", "P1-TP-G1"], ["P1-G1", "P1-G2"]),
+    ]:
+        option = next(x for x in data["p1"] if x["label"] == label)
+        url = option["url"].replace("https://edt.cesi-tools.workers.dev", "")
+        assert_has_titles(request(main.app, url), expected, excluded)
+        assert request(main.app, url, "HEAD").status_code == 200
+
+    accent = next(x for x in data["p2"] if x["label"] == "Équipe spéciale")
+    assert_has_titles(
+        request(main.app, accent["url"].replace("https://edt.cesi-tools.workers.dev", "")),
+        ["P2-COMMUN", "P2-ACCENT"], ["P2-G1", "P2-G2"]
+    )
+    assert request(main.app, "/ics/test-promo/p1-sg-Z3JvdXBlIGluZXhpc3RhbnQ.ics").status_code == 404
+    assert request(main.app, "/ics/test-promo/p1-sg-bad!.ics").status_code == 404
+
+
+def test_custom_group_names_only_show_real_names():
+    main = import_app()
+    old = main.supabase
+    main.supabase = FakeSupabase({
+        "events_p1": [event("P1-COMMUN"), event("P1-ALPHA", ["Atelier Alpha"]), event("P1-BETA", ["Atelier Bêta"])],
+        "events_p2": [event("P2-COMMUN"), event("P2-TD", ["TD A"])],
+    })
+    try:
+        result = request(main.app, "/api/ics-subgroups/test-promo")
+        assert result.status_code == 200
+        assert [o["label"] for o in result.json()["p1"]] == ["Atelier Alpha", "Atelier Bêta"]
+        assert [o["label"] for o in result.json()["p2"]] == ["TD A"]
+    finally:
+        main.supabase = old
+
+
+def test_empty_promo_keeps_legacy_optional_g1_g2_links():
+    main = import_app()
+    assert [x["label"] for x in main.ics_subgroup_options([], "p1")] == ["G1", "G2"]
+
+
+def test_home_page_keeps_original_links_and_removes_explanation():
     env = Environment(loader=FileSystemLoader(str(ROOT / "templates")))
     html = env.get_template("index.html").render(
         plannings=[{
@@ -168,7 +223,11 @@ def test_home_page_still_displays_original_links_and_optional_subgroups():
         user="Tester", current_filter="all",
         request=types.SimpleNamespace(query_params={}),
     )
-    for suffix in ("p1", "p2", "p1-g1", "p1-g2", "p2-g1", "p2-g2"):
+    for suffix in ("p1", "p2"):
         assert f"/ics/test-promo/{suffix}.ics" in html
-    assert '<details class="ics-subgroup-options mb-4">' in html
+    assert '<details class="ics-subgroup-options mb-4" data-planning-slug="test-promo">' in html
     assert "Liens ICS par demi-groupe (optionnel)" in html
+    assert "/api/ics-subgroups/" in html
+    assert "Chaque lien contient les séances" not in html
+    assert "Les liens P1 et P2 ci-dessus restent inchangés" not in html
+    assert "{{ promo | upper }} / G{{ subgroup }}" not in html

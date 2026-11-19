@@ -1,3 +1,5 @@
+import base64
+import binascii
 import io
 import os
 import re
@@ -63,7 +65,7 @@ def normalize_group_label(x):
     s = str(x).strip()
     if not s:
         return None
-    m = re.search(r'G\s*\.?\s*(\d+)', s, re.I)
+    m = re.fullmatch(r'G\s*\.?\s*(\d+)', s, re.I)
     if m:
         return f'G {m.group(1)}'
     m2 = re.search(r'^(?:groupe)?\s*(\d+)$', s, re.I)
@@ -414,9 +416,14 @@ def normalized_event_groups(event: dict) -> List[str]:
         if not text:
             continue
 
-        # Un même champ peut éventuellement contenir plusieurs groupes.
-        matches = re.findall(r"G\s*\.?\s*(\d+)", text, re.I)
-        if matches:
+        # Plusieurs groupes numériques peuvent figurer dans un même champ,
+        # mais « Atelier G1 » reste bien un nom complet de sous-groupe.
+        numeric_list = re.fullmatch(
+            r"G\s*\.?\s*\d+(?:\s*(?:,|;|/|\+|&|\bet\b)\s*G\s*\.?\s*\d+)*",
+            text, re.I,
+        )
+        if numeric_list:
+            matches = re.findall(r"G\s*\.?\s*(\d+)", text, re.I)
             groups.update(f"G {int(number)}" for number in matches)
             continue
 
@@ -1871,25 +1878,132 @@ async def get_teacher_ics_file(slug: str, teacher: str, request: Request):
 
 
 def filter_events_for_subgroup(events: List[dict], subgroup: str) -> List[dict]:
-    """Séances d'un demi-groupe, y compris celles communes à toute la promo.
-
-    Une liste de groupes vide indique une séance de promotion entière.
-    Les libellés G1, G 1, G.1 (etc.) sont normalisés avant comparaison.
-    """
+    """Séances d'un sous-groupe, y compris celles communes à sa promotion."""
+    target_groups = normalized_event_groups({"groups": [subgroup]})
+    if len(target_groups) != 1:
+        return []
+    target = target_groups[0]
     return [
         ev for ev in events
-        if not (groups := normalized_event_groups(ev)) or subgroup in groups
+        if not (groups := normalized_event_groups(ev)) or target in groups
     ]
+
+
+def ics_group_label(group: str) -> str:
+    """Libellé d'affichage lisible, sans modifier les noms personnalisés."""
+    match = re.fullmatch(r"G\s*\.?\s*(\d+)", group, re.I)
+    return f"G{int(match.group(1))}" if match else group
+
+
+def ics_group_code(group: str) -> str:
+    """Conserve g1/g2 ; encode sans ambiguïté les autres noms de groupes."""
+    normalized = normalized_event_groups({"group": group})
+    if len(normalized) != 1:
+        raise ValueError("Nom de groupe ambigu")
+    name = normalized[0]
+    if name in ("G 1", "G 2"):
+        return "g" + name[-1]
+    encoded = base64.urlsafe_b64encode(name.encode("utf-8")).decode("ascii").rstrip("=")
+    return f"sg-{encoded}"
+
+
+def decode_ics_subgroup(code: str) -> str:
+    """Décode un sous-groupe personnalisé (les anciennes URL restent gérées à part)."""
+    if not code.startswith("sg-") or len(code) > 260:
+        raise HTTPException(404, detail="Sous-groupe inconnu")
+    payload = code[3:]
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", payload):
+        raise HTTPException(404, detail="Sous-groupe inconnu")
+    try:
+        raw = base64.b64decode(
+            payload + "=" * (-len(payload) % 4), altchars=b"-_", validate=True
+        ).decode("utf-8")
+        groups = normalized_event_groups({"group": raw})
+        if not raw.strip() or len(raw) > 120 or len(groups) != 1:
+            raise ValueError("Sous-groupe ambigu")
+        return groups[0]
+    except (UnicodeError, ValueError, binascii.Error):
+        raise HTTPException(404, detail="Sous-groupe inconnu")
+
+
+def ics_subgroup_options(events: List[dict], promo: str) -> List[dict]:
+    """Déduit les sous-groupes du planning comme dans les vues calendrier/stats."""
+    labels = {}
+    for ev in events:
+        for group in normalized_event_groups(ev):
+            if group not in labels:
+                # Préserver l'orthographe originale des groupes non numériques.
+                display = ics_group_label(group)
+                originals = ev.get("groups") or ev.get("group") or []
+                if not isinstance(originals, (tuple, list, set)):
+                    originals = [originals]
+                for original in originals:
+                    if normalized_event_groups({"group": original}) == [group]:
+                        display = ics_group_label(str(original).strip())
+                        break
+                labels[group] = display
+
+    # Si au moins un groupe numéroté classique est présent, conserver les deux
+    # liens historiques, même si aucune séance propre à G1 ou G2 n'est inscrite.
+    if "G 1" in labels or "G 2" in labels or not labels:
+        labels.setdefault("G 1", "G1")
+        labels.setdefault("G 2", "G2")
+
+    def natural_sort(group):
+        return [int(x) if x.isdigit() else x.casefold()
+                for x in re.split(r"(\d+)", labels[group])]
+
+    return [
+        {
+            "label": labels[group],
+            "url": f"https://edt.cesi-tools.workers.dev/ics/{{slug}}/{promo}-{ics_group_code(group)}.ics",
+        }
+        for group in sorted(labels, key=natural_sort)
+    ]
+
+
+@app.get("/api/ics-subgroups/{slug}")
+async def get_ics_subgroups(slug: str):
+    """Liste légère des liens par groupe, générée à l'ouverture des options ICS."""
+    try:
+        res = (
+            supabase.table("plannings")
+            .select("events_p1, events_p2")
+            .ilike("slug", slug)
+            .execute()
+        )
+        if not res.data:
+            raise HTTPException(404, detail="Planning introuvable")
+        planning = res.data[0]
+        return {
+            promo: [
+                {**item, "url": item["url"].replace("{slug}", slug)}
+                for item in ics_subgroup_options(planning.get(f"events_{promo}") or [], promo)
+            ]
+            for promo in ("p1", "p2")
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        log_msg(f"Erreur liste sous-groupes ICS: {e}")
+        raise HTTPException(500, detail="Erreur interne")
 
 
 @app.api_route("/ics/{slug}/{group}.ics", methods=["GET", "HEAD"])
 async def get_ics_file(slug: str, group: str, request: Request):
-    """Flux ICS P1/P2 historiques et nouveaux flux P1-G1/G2, P2-G1/G2."""
-    group_clean = group.upper()
-    match = re.fullmatch(r"(P[12])(?:-(G[12]))?", group_clean)
+    """Flux historiques P1/P2 et flux optionnels des sous-groupes réels."""
+    match = re.fullmatch(r"(p[12])(?:-(g[12]|sg-[A-Za-z0-9_-]+))?", group, re.I)
     if not match:
-        raise HTTPException(404, detail="Calendrier inconnu (P1, P2, P1-G1, P1-G2, P2-G1, P2-G2)")
-    promo, subgroup_code = match.groups()
+        raise HTTPException(404, detail="Calendrier inconnu")
+    promo = match.group(1).upper()
+    subgroup_code = match.group(2)
+    subgroup = None
+    if subgroup_code:
+        if subgroup_code.lower() in ("g1", "g2"):
+            subgroup = f"G {subgroup_code[-1]}"
+        else:
+            # Attention : les caractères du base64 sont sensibles à la casse.
+            subgroup = decode_ics_subgroup(subgroup_code)
 
     try:
         res = (
@@ -1903,18 +2017,22 @@ async def get_ics_file(slug: str, group: str, request: Request):
             raise HTTPException(404, detail="Planning introuvable")
 
         events_json = res.data[0].get(f"events_{promo.lower()}", []) or []
-        if subgroup_code:
-            events_json = filter_events_for_subgroup(
-                events_json, f"G {subgroup_code[1:]}"
-            )
+        if subgroup:
+            # Ne pas accepter d'URL personnalisées inventées : le groupe doit
+            # effectivement exister dans ce planning.
+            if subgroup_code.lower().startswith("sg-") and not any(
+                subgroup in normalized_event_groups(ev) for ev in events_json
+            ):
+                raise HTTPException(404, detail="Sous-groupe absent du planning")
+            events_json = filter_events_for_subgroup(events_json, subgroup)
 
         ics_content = events_to_ics_string(
             events_json,
-            # Ne pas modifier les UID des abonnements P1/P2 existants.
-            uid_namespace=f"{slug}:{group_clean}",
+            # Ne pas modifier les UID des abonnements P1/P2 et G1/G2 existants.
+            uid_namespace=f"{slug}:{group.upper() if subgroup_code is None or subgroup_code.lower() in ('g1', 'g2') else group}",
         )
         ics_bytes = ics_content.encode("utf-8")
-        filename = f"{slug}_{group_clean}.ics"
+        filename = f"{slug}_{group}.ics"
 
         headers = {
             "Content-Type": "text/calendar; charset=utf-8",
@@ -1923,11 +2041,8 @@ async def get_ics_file(slug: str, group: str, request: Request):
             "Content-Length": str(len(ics_bytes)),
         }
 
-        # Thunderbird 140+ peut sonder un abonnement ICS avec HEAD avant GET.
-        # FastAPI n'ajoute pas HEAD automatiquement aux routes @app.get().
         if request.method == "HEAD":
             return Response(content=b"", status_code=200, headers=headers)
-
         return Response(content=ics_bytes, status_code=200, headers=headers)
 
     except HTTPException:
@@ -1935,7 +2050,6 @@ async def get_ics_file(slug: str, group: str, request: Request):
     except Exception as e:
         log_msg(f"Erreur ICS generation: {e}")
         raise HTTPException(500, detail="Erreur interne")
-
 
 
 

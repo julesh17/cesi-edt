@@ -341,40 +341,14 @@
                         </div>
                     </div>
 
-                    <details class="ics-subgroup-options mb-4">
+                    <details class="ics-subgroup-options mb-4" data-planning-slug="{{ p.slug }}">
                         <summary>
                             <span><i class="bi bi-people me-2"></i>Liens ICS par demi-groupe (optionnel)</span>
                             <i class="bi bi-chevron-down ics-subgroup-chevron" aria-hidden="true"></i>
                         </summary>
                         <div class="ics-subgroup-content">
-                            <p class="text-muted small mb-3">
-                                Chaque lien contient les séances de G1 ou G2 <strong>et</strong> celles communes à toute sa promotion.
-                                Les liens P1 et P2 ci-dessus restent inchangés.
-                            </p>
-                            {% for promo in ['p1', 'p2'] %}
-                            <div class="ics-subgroup-promo{% if not loop.last %} mb-3{% endif %}">
-                                <div class="ics-subgroup-promo-title">{{ promo | upper }}</div>
-                                {% for subgroup in [1, 2] %}
-                                <div class="mb-2">
-                                    <label class="small text-muted fw-bold mb-1 d-block" style="font-size:11px;">
-                                        {{ promo | upper }} / G{{ subgroup }}
-                                    </label>
-                                    <div class="input-group-code">
-                                        <input type="text" readonly class="form-control"
-                                               value="https://edt.cesi-tools.workers.dev/ics/{{ p.slug }}/{{ promo }}-g{{ subgroup }}.ics"
-                                               id="link-{{ promo }}-g{{ subgroup }}-{{ p.slug }}"
-                                               aria-label="Lien ICS {{ promo | upper }} G{{ subgroup }}">
-                                        <button type="button" class="btn-copy"
-                                                onclick="copyToClipboard('link-{{ promo }}-g{{ subgroup }}-{{ p.slug }}', this)"
-                                                title="Copier le lien {{ promo | upper }} G{{ subgroup }}"
-                                                aria-label="Copier le lien ICS {{ promo | upper }} G{{ subgroup }}">
-                                            <i class="bi bi-clipboard"></i>
-                                        </button>
-                                    </div>
-                                </div>
-                                {% endfor %}
-                            </div>
-                            {% endfor %}
+                            <p class="ics-subgroup-status text-muted small mb-0" role="status">Chargement des groupes…</p>
+                            <div class="ics-subgroup-list"></div>
                         </div>
                     </details>
 
@@ -437,6 +411,76 @@
 </div>
 
 <script>
+    // Comme dans le calendrier et le tableau de bord, les noms des groupes
+    // proviennent des séances enregistrées et ne sont pas limités à G1/G2.
+    document.querySelectorAll('.ics-subgroup-options').forEach(details => {
+        details.addEventListener('toggle', () => {
+            if (details.open && details.dataset.loaded !== 'true' && details.dataset.loading !== 'true') {
+                loadIcsSubgroups(details);
+            }
+        });
+    });
+
+    async function loadIcsSubgroups(details) {
+        details.dataset.loading = 'true';
+        const status = details.querySelector('.ics-subgroup-status');
+        const list = details.querySelector('.ics-subgroup-list');
+        const slug = details.dataset.planningSlug;
+        status.textContent = 'Chargement des groupes…';
+        try {
+            const response = await fetch(`/api/ics-subgroups/${encodeURIComponent(slug)}`, {
+                credentials: 'same-origin', cache: 'no-store'
+            });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const groups = await response.json();
+            list.replaceChildren();
+            for (const promo of ['p1', 'p2']) {
+                const section = document.createElement('div');
+                section.className = promo === 'p1' ? 'ics-subgroup-promo mb-3' : 'ics-subgroup-promo';
+                const title = document.createElement('div');
+                title.className = 'ics-subgroup-promo-title';
+                title.textContent = promo.toUpperCase();
+                section.append(title);
+                for (const [index, group] of (groups[promo] || []).entries()) {
+                    const wrap = document.createElement('div');
+                    wrap.className = 'mb-2';
+                    const label = document.createElement('label');
+                    label.className = 'small text-muted fw-bold mb-1 d-block';
+                    label.style.fontSize = '11px';
+                    const id = `link-${promo}-subgroup-${index}-${slug}`;
+                    label.htmlFor = id;
+                    label.textContent = `${promo.toUpperCase()} / ${group.label}`;
+                    const field = document.createElement('div');
+                    field.className = 'input-group-code';
+                    const input = document.createElement('input');
+                    input.type = 'text';
+                    input.readOnly = true;
+                    input.className = 'form-control';
+                    input.id = id;
+                    input.value = group.url;
+                    input.setAttribute('aria-label', `Lien ICS ${promo.toUpperCase()} ${group.label}`);
+                    const button = document.createElement('button');
+                    button.type = 'button';
+                    button.className = 'btn-copy';
+                    button.title = `Copier le lien ${promo.toUpperCase()} ${group.label}`;
+                    button.setAttribute('aria-label', button.title);
+                    button.innerHTML = '<i class="bi bi-clipboard"></i>';
+                    button.addEventListener('click', () => copyToClipboard(id, button));
+                    field.append(input, button);
+                    wrap.append(label, field);
+                    section.append(wrap);
+                }
+                list.append(section);
+            }
+            status.textContent = '';
+            details.dataset.loaded = 'true';
+        } catch (error) {
+            status.textContent = 'Impossible de charger les liens ICS. Refermez puis rouvrez cette section pour réessayer.';
+        } finally {
+            delete details.dataset.loading;
+        }
+    }
+
     function copyToClipboard(elementId, btn) {
         const el = document.getElementById(elementId);
         el.select();
